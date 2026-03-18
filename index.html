@@ -410,7 +410,7 @@ body{background:var(--bg);font-family:var(--fn);color:var(--txt);min-height:100v
 <script>
 // ══ CONFIG ══
 const PINS = { qc: '0123', mgr: '0125' }; // ← เปลี่ยน PIN ได้ที่นี่
-const TAILOR_NAMES = ['รส','วิกกี้','ริน','วรรณ','พลอย','แอนนา']; // ← เพิ่มชื่อช่างที่นี่
+const TAILOR_NAMES = ['รส','ริน','วิกกี้','พลอย','แอนนา','วรรณ']; // ← เพิ่มชื่อช่างที่นี่
 
 const DEFECT_CATS=[
   {id:'stitch',label:'การตัดเย็บ',ico:'🧵',items:[
@@ -435,7 +435,7 @@ const DEFECT_CATS=[
 const DW={s1:2,s2:2,s6:2,f2:2,z1:2,z2:2,s3:1,s4:1,s5:1,f1:1,f3:1,f4:1,f5:1,f6:1,z3:1,z4:1,l1:1,l2:1,l3:1,l4:1};
 const MG=['A','B','C'];
 
-const SHEET_URL = 'https://script.google.com/macros/s/AKfycbzc1zkcjD9Cyp3kMHP5IUPV0gKD0RduKkMhzq-02TZISwfoEdPd0JnTsbpz91pVFumAxQ/exec';
+const SHEET_URL = 'https://script.google.com/macros/s/AKfycbzzaZg8-zUdkwIoOThxbJmPbEmRZAuYY3JhCf7uK-pZ6BPsaZYvMdB1hQ_jBD8E4XW_hQ/exec';
 
 let records=[];
 try{records=JSON.parse(localStorage.getItem('hunheng_qc3')||'[]');}catch(e){}
@@ -446,24 +446,14 @@ function save(){
   try{ localStorage.setItem('hunheng_qc3', JSON.stringify(records)); }catch(e){}
 }
 
-// JSONP — ข้าม CORS ได้ 100%
-function jsonpGet(url){
-  return new Promise((resolve, reject)=>{
-    const cb = 'jcb_'+Date.now()+'_'+Math.floor(Math.random()*9999);
-    const s = document.createElement('script');
-    const t = setTimeout(()=>{ cleanup(); reject(new Error('timeout')); }, 10000);
-    window[cb] = (data)=>{ cleanup(); resolve(data); };
-    s.onerror = ()=>{ cleanup(); reject(new Error('error')); };
-    function cleanup(){ clearTimeout(t); delete window[cb]; if(s.parentNode) s.parentNode.removeChild(s); }
-    s.src = url + (url.includes('?')?'&':'?') + 'callback='+cb+'&t='+Date.now();
-    document.body.appendChild(s);
-  });
-}
-
 async function loadFromSheet(){
   try{
     showSyncStatus('🔄 กำลังโหลดข้อมูล...');
-    const data = await jsonpGet(SHEET_URL);
+    const res = await fetch(SHEET_URL, {
+      method:'GET',
+      cache:'no-cache'
+    });
+    const data = await res.json();
     if(Array.isArray(data) && data.length > 0){
       records = data.map(r=>{
         if(!r.id) r.id = (r.date||'')+'_'+(r.time||'')+'_'+(r.tailor||'');
@@ -479,6 +469,7 @@ async function loadFromSheet(){
     return true;
   }catch(e){
     hideSyncStatus();
+    console.log('load error',e);
     return false;
   }
 }
@@ -490,16 +481,24 @@ async function sendToSheet(rec){
       lot:rec.lot||'', qty:rec.qty, grade:rec.grade,
       defectLabels:rec.defectLabels||[], note:rec.note||''
     };
-    await fetch(SHEET_URL, { method:'POST', mode:'no-cors', body:JSON.stringify(payload) });
-    return true;
-  }catch(e){ return false; }
+    const res = await fetch(SHEET_URL, {
+      method:'POST',
+      cache:'no-cache',
+      body: JSON.stringify(payload)
+    });
+    const result = await res.json();
+    return result.status === 'ok';
+  }catch(e){
+    console.log('send error',e);
+    return false;
+  }
 }
 
 function showSyncStatus(msg){
   let el=document.getElementById('sync-bar');
   if(!el){
     el=document.createElement('div'); el.id='sync-bar';
-    el.style.cssText='position:fixed;top:0;left:0;right:0;background:#185FA5;color:#fff;text-align:center;font-size:12px;padding:6px;z-index:9999;font-family:var(--fn)';
+    el.style.cssText='position:fixed;top:0;left:0;right:0;background:#185FA5;color:#fff;text-align:center;font-size:12px;padding:8px;z-index:9999;font-family:var(--fn)';
     document.body.appendChild(el);
   }
   el.textContent=msg; el.style.display='block';
@@ -679,14 +678,16 @@ function submitQC(){
     prod:document.getElementById('f-prod').value.trim(),lot:document.getElementById('f-lot').value.trim(),
     grade,qty,defects:ds,defectLabels:dl,quickMode,note:document.getElementById('f-note').value.trim(),photos:[...photos]};
   records.push(rec);
-  save(); // เซฟ localStorage ก่อนเลย
+  save();
   updateSugg(rec.tailor);
-  // ส่งไป Sheet (background - ไม่กระทบการแสดงผล)
-  sendToSheet(rec).then(()=>{
-    showSyncStatus('✓ บันทึกแล้ว — ส่ง Google Sheet สำเร็จ');
-    setTimeout(hideSyncStatus, 2000);
-  }).catch(()=>{
-    // ถ้า Sheet ไม่ได้ก็ไม่เป็นไร ข้อมูลอยู่ใน localStorage แล้ว
+  showSyncStatus('📤 กำลังส่งข้อมูล...');
+  sendToSheet(rec).then((ok)=>{
+    if(ok){
+      showSyncStatus('✅ บันทึกลง Google Sheet สำเร็จ!');
+    } else {
+      showSyncStatus('💾 บันทึกในเครื่องแล้ว (ไม่มีอินเทอร์เน็ต)');
+    }
+    setTimeout(hideSyncStatus, 2500);
   });
   ['f-prod','f-lot','f-note'].forEach(id=>document.getElementById(id).value='');
   photos=[];renderPG();qty=1;sync();quickMode='';grade='';showMG(true);MG.forEach(g=>document.getElementById('gb-'+g).className='gbtn');
